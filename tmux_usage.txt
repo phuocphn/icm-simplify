@@ -1,0 +1,62 @@
+Executing the following commands:
+mkdir -p tmp/doom
+echo /noreward-rl/curiosity/bin/python train.py --default --env-id doom > tmp/doom/cmd.sh
+kill -9 $( lsof -i:12345 -t ) > /dev/null 2>&1
+kill -9 $( lsof -i:12222-12242 -t ) > /dev/null 2>&1
+tmux kill-session -t a3c
+tmux new-session -s a3c -n ps -d bash
+tmux new-window -t a3c -n w-0 bash
+tmux new-window -t a3c -n w-1 bash
+tmux new-window -t a3c -n w-2 bash
+tmux new-window -t a3c -n w-3 bash
+tmux new-window -t a3c -n w-4 bash
+tmux new-window -t a3c -n w-5 bash
+tmux new-window -t a3c -n w-6 bash
+tmux new-window -t a3c -n w-7 bash
+tmux new-window -t a3c -n w-8 bash
+tmux new-window -t a3c -n w-9 bash
+tmux new-window -t a3c -n w-10 bash
+tmux new-window -t a3c -n w-11 bash
+tmux new-window -t a3c -n w-12 bash
+tmux new-window -t a3c -n w-13 bash
+tmux new-window -t a3c -n w-14 bash
+tmux new-window -t a3c -n w-15 bash
+tmux new-window -t a3c -n w-16 bash
+tmux new-window -t a3c -n w-17 bash
+tmux new-window -t a3c -n w-18 bash
+tmux new-window -t a3c -n w-19 bash
+tmux new-window -t a3c -n tb bash
+tmux new-window -t a3c -n htop bash
+sleep 1
+tmux send-keys -t a3c:ps 'CUDA_VISIBLE_DEVICES= python worker.py --log-dir tmp/doom --env-id doom --num-workers 20 --psPort 12222 --envWrap --designHead universe --unsup action --noLifeReward --job-name ps' Enter
+tmux send-keys -t a3c:w-0 'CUDA_VISIBLE_DEVICES= python worker.py --log-dir tmp/doom --env-id doom --num-workers 20 --psPort 12222 --envWrap --designHead universe --unsup action --noLifeReward --job-name worker --task 0 --remotes 1' Enter
+tmux send-keys -t a3c:w-1 'CUDA_VISIBLE_DEVICES= python worker.py --log-dir tmp/doom --env-id doom --num-workers 20 --psPort 12222 --envWrap --designHead universe --unsup action --noLifeReward --job-name worker --task 1 --remotes 1' Enter
+tmux send-keys -t a3c:w-2 'CUDA_VISIBLE_DEVICES= python worker.py --log-dir tmp/doom --env-id doom --num-workers 20 --psPort 12222 --envWrap --designHead universe --unsup action --noLifeReward --job-name worker --task 2 --remotes 1' Enter
+tmux send-keys -t a3c:w-3 'CUDA_VISIBLE_DEVICES= python worker.py --log-dir tmp/doom --env-id doom --num-workers 20 --psPort 12222 --envWrap --designHead universe --unsup action --noLifeReward --job-name worker --task 3 --remotes 1' Enter
+tmux send-keys -t a3c:w-4 'CUDA_VISIBLE_DEVICES= python worker.py --log-dir tmp/doom --env-id doom --num-workers 20 --psPort 12222 --envWrap --designHead universe --unsup action --noLifeReward --job-name worker --task 4 --remotes 1' Enter
+tmux send-keys -t a3c:w-5 'CUDA_VISIBLE_DEVICES= python worker.py --log-dir tmp/doom --env-id doom --num-workers 20 --psPort 12222 --envWrap --designHead universe --unsup action --noLifeReward --job-name worker --task 5 --remotes 1' Enter
+tmux send-keys -t a3c:w-6 'CUDA_VISIBLE_DEVICES= python worker.py --log-dir tmp/doom --env-id doom --num-workers 20 --psPort 12222 --envWrap --designHead universe --unsup action --noLifeReward --job-name worker --task 6 --remotes 1' Enter
+tmux send-keys -t a3c:w-7 'CUDA_VISIBLE_DEVICES= python worker.py --log-dir tmp/doom --env-id doom --num-workers 20 --psPort 12222 --envWrap --designHead universe --unsup action --noLifeReward --job-name worker --task 7 --remotes 1' Enter
+tmux send-keys -t a3c:w-8 'CUDA_VISIBLE_DEVICES= python worker.py --log-dir tmp/doom --env-id doom --num-workers 20 --psPort 12222 --envWrap --designHead universe --unsup action --noLifeReward --job-name worker --task 8 --remotes 1' Enter
+tmux send-keys -t a3c:w-9 'CUDA_VISIBLE_DEVICES= python worker.py --log-dir tmp/doom --env-id doom --num-workers 20 --psPort 12222 --envWrap --designHead universe --unsup action --noLifeReward --job-name worker --task 9 --remotes 1' Enter
+tmux send-keys -t a3c:w-10 'CUDA_VISIBLE_DEVICES= python worker.py --log-dir tmp/doom --env-id doom --num-workers 20 --psPort 12222 --envWrap --designHead universe --unsup action --noLifeReward --job-name worker --task 10 --remotes 1' Enter
+tmux send-keys -t a3c:w-11 'CUDA_VISIBLE_DEVICES= python worker.py --log-dir tmp/doom --env-id doom --num-workers 20 --psPort 12222 --envWrap --designHead universe --unsup action --noLifeReward --job-name worker --task 11 --remotes 1' Enter
+tmux send-keys -t a3c:w-12 'CUDA_VISIBLE_DEVICES= python worker.py --log-dir tmp/doom --env-id doom --num-workers 20 --psPort 12222 --envWrap --designHead universe --unsup action --noLifeReward --job-name worker --task 12 --remotes 1' Enter
+tmux send-keys -t a3c:w-13 'CUDA_VISIBLE_DEVICES= python worker.py --log-dir tmp/doom --env-id doom --num-workers 20 --psPort 12222 --envWrap --designHead universe --unsup action --noLifeReward --job-name worker --task 13 --remotes 1' Enter
+tmux send-keys -t a3c:w-14 'CUDA_VISIBLE_DEVICES= python worker.py --log-dir tmp/doom --env-id doom --num-workers 20 --psPort 12222 --envWrap --designHead universe --unsup action --noLifeReward --job-name worker --task 14 --remotes 1' Enter
+tmux send-keys -t a3c:w-15 'CUDA_VISIBLE_DEVICES= python worker.py --log-dir tmp/doom --env-id doom --num-workers 20 --psPort 12222 --envWrap --designHead universe --unsup action --noLifeReward --job-name worker --task 15 --remotes 1' Enter
+tmux send-keys -t a3c:w-16 'CUDA_VISIBLE_DEVICES= python worker.py --log-dir tmp/doom --env-id doom --num-workers 20 --psPort 12222 --envWrap --designHead universe --unsup action --noLifeReward --job-name worker --task 16 --remotes 1' Enter
+tmux send-keys -t a3c:w-17 'CUDA_VISIBLE_DEVICES= python worker.py --log-dir tmp/doom --env-id doom --num-workers 20 --psPort 12222 --envWrap --designHead universe --unsup action --noLifeReward --job-name worker --task 17 --remotes 1' Enter
+tmux send-keys -t a3c:w-18 'CUDA_VISIBLE_DEVICES= python worker.py --log-dir tmp/doom --env-id doom --num-workers 20 --psPort 12222 --envWrap --designHead universe --unsup action --noLifeReward --job-name worker --task 18 --remotes 1' Enter
+tmux send-keys -t a3c:w-19 'CUDA_VISIBLE_DEVICES= python worker.py --log-dir tmp/doom --env-id doom --num-workers 20 --psPort 12222 --envWrap --designHead universe --unsup action --noLifeReward --job-name worker --task 19 --remotes 1' Enter
+tmux send-keys -t a3c:tb 'tensorboard --logdir tmp/doom --port 12345' Enter
+tmux send-keys -t a3c:htop htop Enter
+
+sh: 3: lsof: not found
+sh: 4: lsof: not found
+error connecting to /tmp/tmux-0/default (No such file or directory)
+Use `tmux attach -t a3c` to watch process output
+Use `tmux kill-session -t a3c` to kill the job
+Point your browser to http://localhost:12345 to see Tensorboard
+
+
