@@ -4,6 +4,8 @@ from time import sleep
 import vizdoom as vzd
 import skimage
 import numpy as np
+import os, sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from models import CNNLSTMPolicy
 import tensorflow as tf
 
@@ -16,7 +18,7 @@ if __name__ == "__main__":
     # Choose scenario config file you wish to watch.
     # Don't load two configs cause the second will overwrite the first one.
     # Multiple config files are ok but combining these ones doesn't make much sense.
-    game.load_config("scenarios/my_way_home.cfg")
+    game.load_config("../scenarios/my_way_home.cfg")
 
     # Makes the screen bigger to see more details.
     game.set_screen_resolution(vzd.ScreenResolution.RES_640X480)
