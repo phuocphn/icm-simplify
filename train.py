@@ -1,5 +1,6 @@
 import tensorflow as tf
 import argparse
+from a3c import A3C
 
 # Get user-provided parameters from args
 parser = argparse.ArgumentParser()
@@ -14,13 +15,13 @@ JOB_NAME, TASK_INDEX, PRETRAIN_MODEL_PATH = [args.job_name, args.task_index, arg
 LOG_DIR = '/tmp/doom'
 ENV_ID = 'doom'
 NUM_WORKERS = 20
-TASK = 2
 TOTAL_TRAINING_STEP = 100           # this is total step and is used for all workers.
 
 cluster = tf.train.ClusterSpec({"ps": "localhost:12200", "worker": ["localhost:12300", "localhost:12301"]})
 if JOB_NAME == 'ps':
     server = tf.train.Server(server_or_cluster_def=cluster, job_name=JOB_NAME, task_index=0,
                              config=tf.ConfigProto(device_filters=["/job:ps"]))
+    print ("Parameter server is starting...")
     server.join()
 
 if JOB_NAME == 'worker':
@@ -29,8 +30,7 @@ if JOB_NAME == 'worker':
                              config=tf.ConfigProto(intra_op_parellelism=1, inter_op_parallelism_threads=2))
 
     env = None
-    trainer = A3CICM(env=env,
-                     worker_task_index=TASK_INDEX) #specify which machine (worker) will be used to train agent.
+    trainer = A3C(env=env, worker_task_index=TASK_INDEX) #specify which machine (worker) will be used to train agent.
 
     # Variables with the name starts with `local...` will not be saved in the checkpoints
     # only save target network and related variables.

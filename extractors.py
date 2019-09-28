@@ -38,39 +38,17 @@ class CNNLSTMPolicy(object):
         self.output = tf.reshape(conv_4, [-1, np.prod(conv_4.get_shape().as_list()[1:])])
         self.logits = tf.contrib.layers.fully_connected(self.output, num_outputs=num_action, activation_fn=None,
                                           weights_initializer=tf.contrib.layers.xavier_initializer(),
-                                          biases_initializer=tf.constant_initializer(0.0))
-
-
-
-"""
-def create_network(session, available_actions_count):
-    # Create the input variables
-    s1_ = tf.placeholder(tf.float32, [None] + list(resolution) + [1], name="State")
-    a_ = tf.placeholder(tf.int32, [None], name="Action")
-    target_q_ = tf.placeholder(tf.float32, [None, available_actions_count], name="TargetQ")
-
-    # Add 2 convolutional layers with ReLu activation
-    conv1 = tf.contrib.layers.convolution2d(s1_, num_outputs=8, kernel_size=[6, 6], stride=[3, 3],
-                                            activation_fn=tf.nn.relu,
-                                            weights_initializer=tf.contrib.layers.xavier_initializer_conv2d(),
-                                            biases_initializer=tf.constant_initializer(0.1))
-    conv2 = tf.contrib.layers.convolution2d(conv1, num_outputs=8, kernel_size=[3, 3], stride=[2, 2],
-                                            activation_fn=tf.nn.relu,
-                                            weights_initializer=tf.contrib.layers.xavier_initializer_conv2d(),
-                                            biases_initializer=tf.constant_initializer(0.1))
-    conv2_flat = tf.contrib.layers.flatten(conv2)
-    fc1 = tf.contrib.layers.fully_connected(conv2_flat, num_outputs=128, activation_fn=tf.nn.relu,
-                                            weights_initializer=tf.contrib.layers.xavier_initializer(),
-                                            biases_initializer=tf.constant_initializer(0.1))
-
-    q = tf.contrib.layers.fully_connected(fc1, num_outputs=available_actions_count, activation_fn=None,
+                                          biases_initializer=tf.constant_initializer(0.1))
+        self.value_function = tf.contrib.layers.fully_connected(self.output, num_outputs=1, activation_fn=None,
                                           weights_initializer=tf.contrib.layers.xavier_initializer(),
                                           biases_initializer=tf.constant_initializer(0.1))
-    best_a = tf.argmax(q, 1)
+        print ("*" * 50)
+        #print ("Number of trainable_variables: ", len(tf.trainable_variables()))
+        trainable_variables = tf.get_collection(key=tf.compat.v1.GraphKeys.TRAINABLE_VARIABLES, scope=tf.get_variable_scope().name)
+        print ("Number of trainable_variables: ", len(trainable_variables))
+        print ("Current variable_scope: ", tf.get_variable_scope().name)
+        print ("Total trainable parameters: ", np.sum([np.prod(v.get_shape().as_list()) for v in trainable_variables]))
 
-    loss = tf.losses.mean_squared_error(q, target_q_)
-
-    optimizer = tf.train.RMSPropOptimizer(learning_rate)
-    # Update the parameters according to the computed gradient using RMSProp.
-    train_step = optimizer.minimize(loss)
-"""
+        for var in trainable_variables:
+            print (var)
+        print ("*" * 50)

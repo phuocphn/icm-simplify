@@ -6,7 +6,7 @@ import skimage
 import numpy as np
 import os, sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from models import CNNLSTMPolicy
+from a3c import A3C
 import tensorflow as tf
 
 def preprocess(img, resolution=(84, 84)):
@@ -25,7 +25,7 @@ if __name__ == "__main__":
     game.set_window_visible(True)
     game.add_game_args('+"bind w +forward" +"bind s +back" +"bind a +left" +"bind d +right"')
 
-    # game.set_mode(vzd.Mode.SPECTATOR)
+    #game.set_mode(vzd.Mode.SPECTATOR)
     game.init()
 
     # Creates all possible actions depending on how many buttons there are.
@@ -49,7 +49,8 @@ if __name__ == "__main__":
     assert 2**actions_num == len(actions)
     print ("****" * 10)
 
-    cnnlstm_model = CNNLSTMPolicy(state_shape=[84, 84, 3], num_action=actions_num)
+    a3c = A3C(env=game, worker_task_index=0)
+    exit()
 
     episodes = 10
     sleep_time = 0.028
@@ -65,19 +66,15 @@ if __name__ == "__main__":
             while not game.is_episode_finished():
 
                 # Gets the state and possibly to something with it
-                state = game.get_state()
-                __state = preprocess(state.screen_buffer) #numpy array with shape (84,84,3)
+                state = preprocess(game.get_state().screen_buffer) #numpy array with shape (84,84,3)
 
-                logits = sess.run([cnnlstm_model.logits], feed_dict={cnnlstm_model.input: [__state] })
-                print ("Logits: ", logits)
+                logits = sess.run([cnnlstm_model.logits], feed_dict={cnnlstm_model.input: [state] })
 
                 # Makes a random action and save the reward.
                 reward = game.make_action(choice(actions))
+                done = game.is_episode_finished()
 
-                print("Game Variables:", state.game_variables)
-                print("Performed action:", game.get_last_action())
-                print("Last Reward:", reward)
-                print("=====================")
+                print ("Logits:", logits, "Reward: ", reward)
 
                 # Sleep some time because processing is too fast to watch.
                 if sleep_time > 0:
