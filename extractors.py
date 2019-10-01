@@ -49,6 +49,14 @@ class CNNLSTMPolicy(object):
         print ("Current variable_scope: ", tf.get_variable_scope().name)
         print ("Total trainable parameters: ", np.sum([np.prod(v.get_shape().as_list()) for v in trainable_variables]))
 
+        # >> > sess.run(tf.multinomial([[8.0, 10.0]], 5))
+        # array([[1, 1, 1, 0, 1]])
+        # http://docs.w3cub.com/tensorflow~python/tf/multinomial/
+
+        # this operation is used for one example mini-batch only
+        # (generating episodes or the inference time).
+        self.actions = tf.squeeze(input=tf.multinomial(logits=self.logits, num_samples=1), axis=1)
+
         for var in trainable_variables:
             print (var)
         print ("*" * 50)

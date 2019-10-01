@@ -1,8 +1,12 @@
 import tensorflow as tf
 from extractors import CNNLSTMPolicy
+import scipy.signal
+import numpy as np
 
 class A3C(object):
     def __init__(self, env, worker_task_index, sess=None):
+        self.env = env
+        self.sess = sess
         # we will definite network and all necessary operations in here.
 
         # define target network in parameter server (`target (global) network weights` and `global step`)
@@ -58,5 +62,93 @@ class A3C(object):
         )]
         self.sync_weights_op = tf.group(*sync_assigns)
 
-    def train(self, sess):
+    def train(self):
+        # sync weights from global target network
+        self.sess.run(self.sync_weights_op)
+
+        current_state = self.env.reset()
+        lengths = 0
+        rewards = 0
+        values = 0
+
+        # generate batch of episodes
+        episode_rollout = EpisodeRollout()
+        should_bootstrap = True
+        for _ in range(1e3):
+            action, value =self.sess.run([self.local_network.actions, self.local_network.value_function],
+                             feed_dict = {self.local_network.inputs: [current_state]}
+                            )
+
+            action = action[0][0]
+            value = value[0][0]
+            assert (type(action) == int)
+            next_state, reward, terminal, info = self.env.step(action)
+            episode_rollout.add([current_state, action, next_state, reward, value, terminal])
+            rewards += reward
+            lengths += 1
+            values += value
+
+            current_state = next_state
+            if terminal or lengths > self.env.spec.tags.get('wrapper_config.TimeLimit.max_episode_steps'):
+                terminal = True
+                current_state = self.env.reset()
+                lengths = 0
+                rewards = 0
+                should_bootstrap = False
+                break
+
+        # if this loop is ended because of out of index and [not terminal state or time-limit max_episode_steps]
+        if should_bootstrap:
+            bootstrap_value = self.sess.run(self.local_network.value_function, feed_dict={self.local_network.input: [current_state]}) [0]
+            episode_rollout.update_bootstrap_value(bootstrap_value)
+
+        [batch_states, batch_actions, batch_advantages, batch_r, terminal] = episode_rollout.get_training_batch()
         pass
+
+
+class EpisodeRollout(object):
+    def __init__(self):
+        self.states = []
+        self.actions = []
+        self.rewards = []
+        self.values = []
+        self.terminal = False
+        self.bootstrap_value = 0.0
+
+    def add(self, state, action, reward, value, terminal):
+        self.states += [state]
+        self.actions += [action]
+        self.rewards += [reward]
+        self.values += [value]
+        self.terminal = terminal
+
+    def extend(self, other_history):
+        assert  self.terminal == False
+        self.states.extend(other_history.states)
+        self.actions.extend(other_history.actions)
+        self.rewards.extend(other_history.rewards)
+        self.values.extend(other_history.values)
+        self.terminal = other_history.terminal
+
+    def update_bootstrap_value(self, value):
+        self.bootstrap_value = value
+
+    def discount(self, x, gamma):
+        return scipy.signal.lfilter([1], [1, -gamma], x[::-1], axis=0)[::-1]
+
+    def get_training_batch(self):
+        batch_states = np.asarray(self.states)
+        batch_actions = np.asarray(self.actions)
+
+        # collecting target for value network
+        #clip reward
+        rewards = np.asarray(self.rewards)
+        rewards = np.clip(rewards, -1, 1)
+        batch_r = self.discount(rewards + [self.bootstrap_value], gamma=0.99)[:-1]
+
+        #collecting target for policy network
+        value_predictions = np.asarray(self.values + [self.r])
+        delta_t = rewards + 0.99 * value_predictions[1:] - value_predictions[:-1]
+        batch_advantages = self.discount(delta_t, 0.99 * 1.0)
+
+        return [batch_states, batch_actions, batch_advantages, batch_r, self.terminal]
