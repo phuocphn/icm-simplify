@@ -13,9 +13,9 @@ class CNNLSTMPolicy(object):
         """
 
         # https://github.com/mwydmuch/ViZDoom/blob/b50fcd26ffeebb07d9527c8b951976907ef2acfe/examples/python/learning_tensorflow.py
-        self.input = tf.placeholder(dtype=tf.float32, shape=[None] + state_shape, name="input")
+        self.inputs = tf.placeholder(dtype=tf.float32, shape=[None] + state_shape, name="input")
 
-        conv_1 = tf.contrib.layers.convolution2d(self.input, num_outputs=32, kernel_size=[3, 3], stride=[2, 2],
+        conv_1 = tf.contrib.layers.convolution2d(self.inputs, num_outputs=32, kernel_size=[3, 3], stride=[2, 2],
                                                 activation_fn=tf.nn.elu,
                                                 weights_initializer=tf.contrib.layers.xavier_initializer_conv2d(),
                                                 biases_initializer=tf.constant_initializer(0.1))
@@ -36,9 +36,13 @@ class CNNLSTMPolicy(object):
                                                 biases_initializer=tf.constant_initializer(0.1))
 
         self.output = tf.reshape(conv_4, [-1, np.prod(conv_4.get_shape().as_list()[1:])])
+
+        # ACTOR : A policy function, controls how our agent acts.
         self.logits = tf.contrib.layers.fully_connected(self.output, num_outputs=num_action, activation_fn=None,
                                           weights_initializer=tf.contrib.layers.xavier_initializer(),
                                           biases_initializer=tf.constant_initializer(0.1))
+
+        # CRITIC : A value function, measures how good these actions are.
         self.value_function = tf.contrib.layers.fully_connected(self.output, num_outputs=1, activation_fn=None,
                                           weights_initializer=tf.contrib.layers.xavier_initializer(),
                                           biases_initializer=tf.constant_initializer(0.1))
@@ -55,7 +59,7 @@ class CNNLSTMPolicy(object):
 
         # this operation is used for one example mini-batch only
         # (generating episodes or the inference time).
-        self.actions = tf.squeeze(input=tf.multinomial(logits=self.logits, num_samples=1), axis=1)
+        self.actions = tf.one_hot(tf.squeeze(input=tf.multinomial(logits=self.logits, num_samples=1), axis=1), depth=num_action, name='one_hot')[0, :]
 
         for var in trainable_variables:
             print (var)

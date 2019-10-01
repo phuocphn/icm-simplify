@@ -2,11 +2,15 @@ import tensorflow as tf
 from extractors import CNNLSTMPolicy
 import scipy.signal
 import numpy as np
+import skimage
+from tqdm import tqdm
 
 class A3C(object):
     def __init__(self, env, worker_task_index, sess=None):
         self.env = env
         self.sess = sess
+        self.is_chief = (worker_task_index==0)
+
         # we will definite network and all necessary operations in here.
 
         # define target network in parameter server (`target (global) network weights` and `global step`)
@@ -53,7 +57,7 @@ class A3C(object):
         grads_and_vars = list(zip(gradients, tf.get_collection(key=tf.GraphKeys.TRAINABLE_VARIABLES, scope="global")))
 
         optimizer = tf.train.AdamOptimizer(learning_rate=float(1e-4))
-        self.train_op = tf.group(optimizer.apply_gradients(grads_and_vars=grads_and_vars, global_step=self.global_step.assign_add(1)))
+        self.train_op = tf.group(optimizer.apply_gradients(grads_and_vars=grads_and_vars, global_step=self.global_step.assign_add(1))) #NOTE: 1 or shape[0]
 
         # copy weights from the parameter server to the local model.
         sync_assigns = [local_var.assign(global_var) for local_var, global_var in zip(
@@ -62,11 +66,16 @@ class A3C(object):
         )]
         self.sync_weights_op = tf.group(*sync_assigns)
 
-    def train(self):
+    def preprocess(self, img, resolution=(84, 84)):
+        return np.asarray(skimage.transform.resize(img, resolution).astype(np.float32))
+
+    def train(self, sess):
+        self.sess = sess
+
         # sync weights from global target network
         self.sess.run(self.sync_weights_op)
 
-        current_state = self.env.reset()
+        current_state = self.preprocess(self.env.reset())
         lengths = 0
         rewards = 0
         values = 0
@@ -74,16 +83,18 @@ class A3C(object):
         # generate batch of episodes
         episode_rollout = EpisodeRollout()
         should_bootstrap = True
-        for _ in range(1e3):
+        for _ in range(10000):
             action, value =self.sess.run([self.local_network.actions, self.local_network.value_function],
                              feed_dict = {self.local_network.inputs: [current_state]}
                             )
 
-            action = action[0][0]
             value = value[0][0]
-            assert (type(action) == int)
-            next_state, reward, terminal, info = self.env.step(action)
-            episode_rollout.add([current_state, action, next_state, reward, value, terminal])
+            next_state, reward, terminal, info = self.env.step(action.argmax())
+            next_state = self.preprocess(next_state)
+
+            self.env.render()
+
+            episode_rollout.add(next_state, action, reward, value, terminal)
             rewards += reward
             lengths += 1
             values += value
@@ -99,12 +110,29 @@ class A3C(object):
 
         # if this loop is ended because of out of index and [not terminal state or time-limit max_episode_steps]
         if should_bootstrap:
-            bootstrap_value = self.sess.run(self.local_network.value_function, feed_dict={self.local_network.input: [current_state]}) [0]
+            bootstrap_value = self.sess.run(self.local_network.value_function, feed_dict={self.local_network.inputs: [current_state]}) [0]
             episode_rollout.update_bootstrap_value(bootstrap_value)
 
-        [batch_states, batch_actions, batch_advantages, batch_r, terminal] = episode_rollout.get_training_batch()
-        pass
+        [batch_states, batch_actions, batch_advantages, batch_rewards, terminal] = episode_rollout.get_training_batch()
 
+        if not terminal:
+            print ("ingore ....." * 100)
+            return
+
+        if self.is_chief:
+            pass
+
+        fetches = [self.train_op, self.global_step]
+        feed_dict = {
+            self.local_network.inputs: batch_states,
+            self.advantages: batch_advantages,
+            self.actions: batch_actions,
+            self.rewards: batch_rewards,
+        }
+        fetched = self.sess.run(fetches, feed_dict)
+        if terminal:
+            print (f"Global step counter: {fetched[-1]}")
+        print ("Train ...")
 
 class EpisodeRollout(object):
     def __init__(self):
@@ -144,11 +172,11 @@ class EpisodeRollout(object):
         #clip reward
         rewards = np.asarray(self.rewards)
         rewards = np.clip(rewards, -1, 1)
-        batch_r = self.discount(rewards + [self.bootstrap_value], gamma=0.99)[:-1]
+        batch_rewards = self.discount(rewards + [self.bootstrap_value], gamma=0.99)[:-1]
 
         #collecting target for policy network
-        value_predictions = np.asarray(self.values + [self.r])
+        value_predictions = np.asarray(self.values + [self.bootstrap_value])
         delta_t = rewards + 0.99 * value_predictions[1:] - value_predictions[:-1]
         batch_advantages = self.discount(delta_t, 0.99 * 1.0)
 
-        return [batch_states, batch_actions, batch_advantages, batch_r, self.terminal]
+        return [batch_states, batch_actions, batch_advantages, batch_rewards, self.terminal]

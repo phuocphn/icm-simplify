@@ -1,6 +1,10 @@
 import tensorflow as tf
 import argparse
 from a3c import A3C
+import gym
+import time
+import os
+import numpy as np
 
 # Get user-provided parameters from args
 parser = argparse.ArgumentParser()
@@ -12,13 +16,23 @@ args = parser.parse_args()
 JOB_NAME, TASK_INDEX, PRETRAIN_MODEL_PATH = [args.job_name, args.task_index, args.pretrain_path]
 
 # Constants and hyper-parameters
-LOG_DIR = '/tmp/doom'
-ENV_ID = 'doom'
+LOG_DIR = '/tmp/mspacman-v0'
+ENV_ID = 'MsPacman-v0'
 NUM_WORKERS = 20
-TOTAL_TRAINING_STEP = 100           # this is total step and is used for all workers.
+TOTAL_TRAINING_STEP = 10000           # this is total step and is used for all workers.
 
-cluster = tf.train.ClusterSpec({"ps": "localhost:12200", "worker": ["localhost:12300", "localhost:12301"]})
+env = gym.make('MsPacman-v0')
+print ("*" * 50)
+#(0 = center, 1 = up, 2 = right, 3 = left, 4 = down, 5 = upper-right, 6 = upper-left, 7 = lower-right, 8 = lower-left)
+print ("Observation space: ", env.observation_space)
+print ("Action space: ", env.action_space)
+print ("env.spec.timestep_limit: ", env.spec.tags.get('wrapper_config.TimeLimit.max_episode_steps'))
+print ("*" * 50)
+time.sleep(5)
+
+cluster = tf.train.ClusterSpec({"ps": ["localhost:12200"], "worker": ["localhost:12300", "localhost:12301"]})
 if JOB_NAME == 'ps':
+    os.system("kill -9 $( lsof -i:12200 -t ) > /dev/null 2>&1")
     server = tf.train.Server(server_or_cluster_def=cluster, job_name=JOB_NAME, task_index=0,
                              config=tf.ConfigProto(device_filters=["/job:ps"]))
     print ("Parameter server is starting...")
@@ -26,10 +40,11 @@ if JOB_NAME == 'ps':
 
 if JOB_NAME == 'worker':
     # Create server obj to get managed_session, and then train agent.
+    os.system("kill -9 $( lsof -i:12300-12301 -t ) > /dev/null 2>&1")
     server = tf.train.Server(server_or_cluster_def=cluster, job_name=JOB_NAME, task_index=TASK_INDEX,
-                             config=tf.ConfigProto(intra_op_parellelism=1, inter_op_parallelism_threads=2))
+                             config=tf.ConfigProto(intra_op_parallelism_threads=1, inter_op_parallelism_threads=2))
 
-    env = None
+    env = gym.make('MsPacman-v0')
     trainer = A3C(env=env, worker_task_index=TASK_INDEX) #specify which machine (worker) will be used to train agent.
 
     # Variables with the name starts with `local...` will not be saved in the checkpoints
@@ -49,15 +64,17 @@ if JOB_NAME == 'worker':
     with supervisor.managed_session(master=server.target,
                                     config=tf.ConfigProto(device_filters=["/job:ps", f"/job:worker/task:{TASK_INDEX}/cpu:0"])) as sess:
 
-        saver.restore(sess=sess, save_path=tf.train.latest_checkpoint(PRETRAIN_MODEL_PATH))
-        sess.run(tf.global_variables_initializer())
-        sess.run(trainer.sync_weight_from_target_network)
-        current_training_step =  sess.run(trainer.training_step)    # training_step is put in parameter server.
-        print (f"Worker: {JOB_NAME + ':'+ TASK_INDEX } in training step: {current_training_step}")
+        if PRETRAIN_MODEL_PATH:
+            saver.restore(sess=sess, save_path=tf.train.latest_checkpoint(PRETRAIN_MODEL_PATH))
 
-        while not supervisor.should_stop() and current_training_step < TOTAL_TRAINING_STEP:
+        #sess.run(tf.global_variables_initializer())
+        sess.run(trainer.sync_weights_op)
+        global_step =  sess.run(trainer.global_step)    # training_step is put in parameter server.
+        print (f"Worker: {JOB_NAME + ':'+ str(TASK_INDEX) } start training at global step: {str(global_step)}")
+
+        while not supervisor.should_stop() and global_step < TOTAL_TRAINING_STEP:
             trainer.train(sess=sess)
-            current_training_step = sess.run(trainer.training_step)
+            global_step = sess.run(trainer.global_step)
 
     # Ask for all the services to stop.
     supervisor.stop()

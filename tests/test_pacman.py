@@ -14,8 +14,8 @@ time.sleep(5)
 for i_episode in range(20):
     observation = env.reset()
 
-    #skip the start
-    [env.step(0) for _ in range(90)]
+    # #skip the start
+    # [env.step(0) for _ in range(90)]
 
     for t in range(1000000):
         env.render()
