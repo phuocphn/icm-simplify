@@ -13,7 +13,7 @@ class CNNLSTMPolicy(object):
         """
 
         # https://github.com/mwydmuch/ViZDoom/blob/b50fcd26ffeebb07d9527c8b951976907ef2acfe/examples/python/learning_tensorflow.py
-        self.inputs = tf.placeholder(dtype=tf.float32, shape=[None] + state_shape, name="input")
+        self.inputs = tf.placeholder(dtype=tf.float32, shape=[None] + state_shape, name="inputs")
 
         conv_1 = tf.contrib.layers.convolution2d(self.inputs, num_outputs=32, kernel_size=[3, 3], stride=[2, 2],
                                                 activation_fn=tf.nn.elu,

@@ -19,7 +19,7 @@ JOB_NAME, TASK_INDEX, PRETRAIN_MODEL_PATH = [args.job_name, args.task_index, arg
 LOG_DIR = '/tmp/mspacman-v0'
 ENV_ID = 'MsPacman-v0'
 NUM_WORKERS = 20
-TOTAL_TRAINING_STEP = 10000           # this is total step and is used for all workers.
+TOTAL_TRAINING_STEP = 1000000           # this is total step and is used for all workers.
 
 env = gym.make('MsPacman-v0')
 print ("*" * 50)
@@ -30,9 +30,9 @@ print ("env.spec.timestep_limit: ", env.spec.tags.get('wrapper_config.TimeLimit.
 print ("*" * 50)
 time.sleep(5)
 
-cluster = tf.train.ClusterSpec({"ps": ["localhost:12200"], "worker": ["localhost:12300", "localhost:12301"]})
+cluster = tf.train.ClusterSpec({"ps": ["localhost:12200"], "worker": ["localhost:12300", "localhost:12301", "localhost:12302", "localhost:12303"]})
 if JOB_NAME == 'ps':
-    os.system("kill -9 $( lsof -i:12200 -t ) > /dev/null 2>&1")
+    #os.system("kill -9 $( lsof -i:12200 -t ) > /dev/null 2>&1")
     server = tf.train.Server(server_or_cluster_def=cluster, job_name=JOB_NAME, task_index=0,
                              config=tf.ConfigProto(device_filters=["/job:ps"]))
     print ("Parameter server is starting...")
@@ -40,7 +40,7 @@ if JOB_NAME == 'ps':
 
 if JOB_NAME == 'worker':
     # Create server obj to get managed_session, and then train agent.
-    os.system("kill -9 $( lsof -i:12300-12301 -t ) > /dev/null 2>&1")
+    #os.system("kill -9 $( lsof -i:12300-12301 -t ) > /dev/null 2>&1")
     server = tf.train.Server(server_or_cluster_def=cluster, job_name=JOB_NAME, task_index=TASK_INDEX,
                              config=tf.ConfigProto(intra_op_parallelism_threads=1, inter_op_parallelism_threads=2))
 
@@ -53,27 +53,31 @@ if JOB_NAME == 'worker':
     selected_variables_init_op = tf.variables_initializer(selected_variables)
 
     saver = tf.train.Saver(var_list=selected_variables)
+    summary_writer = tf.summary.FileWriter(LOG_DIR + "__%d" % TASK_INDEX)
+
     supervisor = tf.train.Supervisor(is_chief=(JOB_NAME=='worker' and TASK_INDEX==0),
                              logdir=LOG_DIR,
                              saver=saver,
                              init_op=selected_variables_init_op,
+                             summary_writer=summary_writer,
+                             summary_op=None,
                              ready_op=tf.report_uninitialized_variables(selected_variables),
                              global_step=trainer.global_step,
                              save_model_secs=30 # Number of seconds between the creation of model checkpoints. Defaults to 600 seconds. Pass 0 to disable checkpoints.
                             )
     with supervisor.managed_session(master=server.target,
-                                    config=tf.ConfigProto(device_filters=["/job:ps", f"/job:worker/task:{TASK_INDEX}/cpu:0"])) as sess:
+                                    config=tf.ConfigProto(device_filters=["/job:ps", f"/job:worker/task:{TASK_INDEX}/cpu:0"])) as sess, sess.as_default():
 
         if PRETRAIN_MODEL_PATH:
             saver.restore(sess=sess, save_path=tf.train.latest_checkpoint(PRETRAIN_MODEL_PATH))
 
-        #sess.run(tf.global_variables_initializer())
         sess.run(trainer.sync_weights_op)
+        trainer.provide_context(sess=sess, summary_writer=summary_writer)
         global_step =  sess.run(trainer.global_step)    # training_step is put in parameter server.
         print (f"Worker: {JOB_NAME + ':'+ str(TASK_INDEX) } start training at global step: {str(global_step)}")
 
         while not supervisor.should_stop() and global_step < TOTAL_TRAINING_STEP:
-            trainer.train(sess=sess)
+            trainer.train(sess=sess, summary_writer=summary_writer)
             global_step = sess.run(trainer.global_step)
 
     # Ask for all the services to stop.

@@ -10,6 +10,7 @@ class A3C(object):
         self.env = env
         self.sess = sess
         self.is_chief = (worker_task_index==0)
+        self.worker_task_index = worker_task_index
 
         # we will definite network and all necessary operations in here.
 
@@ -18,7 +19,7 @@ class A3C(object):
                 ps_tasks=1, ps_device="/job:ps",
                 worker_device="/job:worker/task:{}/cpu:0".format(worker_task_index))):
             with tf.variable_scope("global", reuse=None):
-                self.global_network = CNNLSTMPolicy(state_shape = [84, 84, 3], num_action=5) #NOTE: get state_shape from env.observation_space later.
+                self.global_network = CNNLSTMPolicy(state_shape = [160, 120, 3], num_action=env.action_space.n) #NOTE: get state_shape from env.observation_space later.
                 self.global_step = tf.get_variable(name="global_step",
                                                    shape=[],
                                                    dtype=tf.int32,
@@ -31,46 +32,62 @@ class A3C(object):
         # define local network in local worker (`local network weights` and `local step`)
         with tf.device(device_name_or_function="/job:worker/task:{}/cpu:0".format(worker_task_index)):
             with tf.variable_scope("local", reuse=None):
-                self.local_network =  CNNLSTMPolicy(state_shape = [84, 84, 3], num_action=5)
-                self.local_step = self.global_step
+                self.local_network  =  CNNLSTMPolicy(state_shape = [160, 120, 3], num_action=env.action_space.n)
+                self.local_network.global_step = self.global_step
                 #NOTE: #ICM,  we will implement this later
                 #self.local_prediction_network = StateActionPredictor(state_shape = env.observation_space.shape, num_action=env.action_space.n)
 
 
-        self.actions = tf.placeholder(dtype=tf.float32, shape=[None, 5], name="actions") #NOTE: get shape from env.action_space.n later.
-        self.advantages = tf.placeholder(dtype=tf.float32, shape=[None], name="advantages")
-        self.rewards = tf.placeholder(dtype=tf.float32, shape=[None], name="rewards")
+            self.actions = tf.placeholder(dtype=tf.float32, shape=[None, 5], name="actions") #NOTE: get shape from env.action_space.n later.
+            self.advantages = tf.placeholder(dtype=tf.float32, shape=[None], name="advantages")
+            self.rewards = tf.placeholder(dtype=tf.float32, shape=[None], name="rewards")
 
-        # https://discuss.pytorch.org/t/what-is-the-difference-between-log-softmax-and-softmax/11801
-        probs = tf.nn.softmax(self.local_network.logits)
+            # https://discuss.pytorch.org/t/what-is-the-difference-between-log-softmax-and-softmax/11801
+            probs = tf.nn.softmax(self.local_network.logits)
 
-        policy_loss =  -tf.reduce_mean(input_tensor= tf.reduce_sum(tf.log(probs) * self.actions, axis=1) * self.advantages) #scalar value
-        value_function_loss = 0.5 * tf.reduce_mean(tf.square(self.local_network.value_function - self.rewards))
-        entropy_loss = -tf.reduce_mean(tf.reduce_sum(probs * tf.log(probs), axis=1)) #element-wise multiplication
-        self.loss = policy_loss + 0.5 * value_function_loss - entropy_loss * 0.01
+            policy_loss =  -tf.reduce_mean(input_tensor= tf.reduce_sum(tf.log(probs) * self.actions, axis=1) * self.advantages) #scalar value
+            value_function_loss = 0.5 * tf.reduce_mean(tf.square(self.local_network.value_function - self.rewards))
+            entropy_loss = -tf.reduce_mean(tf.reduce_sum(probs * tf.log(probs), axis=1)) #element-wise multiplication
+            self.loss = policy_loss + 0.5 * value_function_loss - entropy_loss * 0.01
 
-        gradients = tf.gradients(self.loss, tf.get_collection(key=tf.GraphKeys.TRAINABLE_VARIABLES, scope="local"))
-        # NOTE: #ICM,  we will implement this later
-        #self.prediction_network_gradients =  0.01 * self.local_prediction_network.
+            gradients = tf.gradients(self.loss, tf.get_collection(key=tf.GraphKeys.TRAINABLE_VARIABLES, scope="local"))
+            # NOTE: #ICM,  we will implement this later
+            #self.prediction_network_gradients =  0.01 * self.local_prediction_network.
 
-        gradients, gradient_norms = tf.clip_by_global_norm(t_list=gradients,clip_norm=40.0)
-        grads_and_vars = list(zip(gradients, tf.get_collection(key=tf.GraphKeys.TRAINABLE_VARIABLES, scope="global")))
+            tf.summary.scalar("model/policy_loss", policy_loss )
+            tf.summary.scalar("model/value_loss", value_function_loss )
+            tf.summary.scalar("model/entropy", entropy_loss)
+            tf.summary.scalar("model/reward_mean", tf.math.reduce_mean(self.rewards))
+            tf.summary.scalar("model/grad_global_norm", tf.global_norm(gradients))
+            tf.summary.scalar("model/variable_global_norm", tf.global_norm(tf.get_collection(key=tf.GraphKeys.TRAINABLE_VARIABLES, scope="local")))
 
-        optimizer = tf.train.AdamOptimizer(learning_rate=float(1e-4))
-        self.train_op = tf.group(optimizer.apply_gradients(grads_and_vars=grads_and_vars, global_step=self.global_step.assign_add(1))) #NOTE: 1 or shape[0]
+            self.summary_op = tf.summary.merge_all()
 
-        # copy weights from the parameter server to the local model.
-        sync_assigns = [local_var.assign(global_var) for local_var, global_var in zip(
-            tf.get_collection(key=tf.GraphKeys.TRAINABLE_VARIABLES, scope="local"),
-            tf.get_collection(key=tf.GraphKeys.TRAINABLE_VARIABLES, scope="global")
-        )]
-        self.sync_weights_op = tf.group(*sync_assigns)
+            gradients, gradient_norms = tf.clip_by_global_norm(t_list=gradients,clip_norm=40.0)
+            grads_and_vars = list(zip(gradients, tf.get_collection(key=tf.GraphKeys.TRAINABLE_VARIABLES, scope="global")))
 
-    def preprocess(self, img, resolution=(84, 84)):
+            optimizer = tf.train.AdamOptimizer(learning_rate=float(1e-4))
+            self.train_op = tf.group(optimizer.apply_gradients(grads_and_vars=grads_and_vars,
+                                                               global_step=self.global_step.assign_add( 1)))
+
+            # copy weights from the parameter server to the local model.
+            sync_assigns = [local_var.assign(global_var) for local_var, global_var in zip(
+                tf.get_collection(key=tf.GraphKeys.TRAINABLE_VARIABLES, scope="local"),
+                tf.get_collection(key=tf.GraphKeys.TRAINABLE_VARIABLES, scope="global")
+            )]
+            self.sync_weights_op = tf.group(*sync_assigns)
+
+            self.summary_writer = None
+            self.local_step = 0
+
+    def preprocess(self, img, resolution=(160, 120)):
         return np.asarray(skimage.transform.resize(img, resolution).astype(np.float32))
 
-    def train(self, sess):
+    def provide_context(self, sess, summary_writer):
         self.sess = sess
+        self.summary_writer = summary_writer
+
+    def train(self, sess, summary_writer):
 
         # sync weights from global target network
         self.sess.run(self.sync_weights_op)
@@ -116,23 +133,30 @@ class A3C(object):
         [batch_states, batch_actions, batch_advantages, batch_rewards, terminal] = episode_rollout.get_training_batch()
 
         if not terminal:
-            print ("ingore ....." * 100)
+            print ("*" * 100)
+            print ("ignore.")
             return
 
-        if self.is_chief:
-            pass
+        should_write_summary = (self.is_chief and self.local_step % 10 == 0)
+        if should_write_summary:
+            fetches =  [self.train_op, self.global_step]
+        else:
+            fetches = [self.train_op, self.global_step]
 
-        fetches = [self.train_op, self.global_step]
         feed_dict = {
             self.local_network.inputs: batch_states,
             self.advantages: batch_advantages,
             self.actions: batch_actions,
             self.rewards: batch_rewards,
         }
-        fetched = self.sess.run(fetches, feed_dict)
-        if terminal:
-            print (f"Global step counter: {fetched[-1]}")
-        print ("Train ...")
+        fetched = self.sess.run(fetches, feed_dict=feed_dict)
+        self.local_step += 1
+
+        if should_write_summary:
+            summary = sess.run(self.summary_op, feed_dict=feed_dict)
+            self.summary_writer.add_summary(summary, fetched[-1])
+            self.summary_writer.flush()
+        print (f"*** Worker {self.worker_task_index} at local step: {self.local_step}, reward_mean: {np.mean(batch_rewards)}")
 
 class EpisodeRollout(object):
     def __init__(self):
