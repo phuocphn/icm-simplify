@@ -1,5 +1,5 @@
 import tensorflow as tf
-from extractors import CNNLSTMPolicy
+from policys import CNNLSTMPolicy
 import scipy.signal
 import numpy as np
 import skimage
@@ -38,7 +38,7 @@ class A3C(object):
                 #self.local_prediction_network = StateActionPredictor(state_shape = env.observation_space.shape, num_action=env.action_space.n)
 
 
-            self.actions = tf.placeholder(dtype=tf.float32, shape=[None, 5], name="actions") #NOTE: get shape from env.action_space.n later.
+            self.actions = tf.placeholder(dtype=tf.float32, shape=[None, env.action_space.n], name="actions") #NOTE: get shape from env.action_space.n later.
             self.advantages = tf.placeholder(dtype=tf.float32, shape=[None], name="advantages")
             self.rewards = tf.placeholder(dtype=tf.float32, shape=[None], name="rewards")
 
@@ -93,6 +93,9 @@ class A3C(object):
         self.sess.run(self.sync_weights_op)
 
         current_state = self.preprocess(self.env.reset())
+        rnn_features = self.local_network.state_init
+
+
         lengths = 0
         rewards = 0
         values = 0
@@ -101,25 +104,29 @@ class A3C(object):
         episode_rollout = EpisodeRollout()
         should_bootstrap = True
         for _ in range(10000):
-            action, value =self.sess.run([self.local_network.actions, self.local_network.value_function],
-                             feed_dict = {self.local_network.inputs: [current_state]}
+            action, value, features =self.sess.run([self.local_network.actions, self.local_network.value_function, self.local_network.state_out],
+                             feed_dict = {self.local_network.inputs: [current_state],
+                                          self.local_network.state_in[0]: rnn_features[0],
+                                          self.local_network.state_in[1]: rnn_features[1]}
                             )
-
             value = value[0][0]
             next_state, reward, terminal, info = self.env.step(action.argmax())
             next_state = self.preprocess(next_state)
 
             self.env.render()
 
-            episode_rollout.add(next_state, action, reward, value, terminal)
+            episode_rollout.add(next_state, action, reward, value, terminal, rnn_features)
             rewards += reward
             lengths += 1
             values += value
 
             current_state = next_state
+            rnn_features = features
+
             if terminal or lengths > self.env.spec.tags.get('wrapper_config.TimeLimit.max_episode_steps'):
                 terminal = True
                 current_state = self.env.reset()
+                rnn_features = self.local_network.state_init
                 lengths = 0
                 rewards = 0
                 should_bootstrap = False
@@ -127,10 +134,13 @@ class A3C(object):
 
         # if this loop is ended because of out of index and [not terminal state or time-limit max_episode_steps]
         if should_bootstrap:
-            bootstrap_value = self.sess.run(self.local_network.value_function, feed_dict={self.local_network.inputs: [current_state]}) [0]
+            bootstrap_value = self.sess.run(self.local_network.value_function,
+                                            feed_dict={self.local_network.inputs: [current_state],
+                                                       self.local_network.state_in[0]: rnn_features[0],
+                                                       self.local_network.state_in[1]: rnn_features[1]}) [0]
             episode_rollout.update_bootstrap_value(bootstrap_value)
 
-        [batch_states, batch_actions, batch_advantages, batch_rewards, terminal] = episode_rollout.get_training_batch()
+        [batch_states, batch_actions, batch_advantages, batch_rewards, terminal, batch_features] = episode_rollout.get_training_batch()
 
         if not terminal:
             print ("*" * 100)
@@ -148,6 +158,8 @@ class A3C(object):
             self.advantages: batch_advantages,
             self.actions: batch_actions,
             self.rewards: batch_rewards,
+            self.local_network.state_in[0]: batch_features[0],
+            self.local_network.state_in[1]: batch_features[1],
         }
         fetched = self.sess.run(fetches, feed_dict=feed_dict)
         self.local_step += 1
@@ -165,14 +177,17 @@ class EpisodeRollout(object):
         self.rewards = []
         self.values = []
         self.terminal = False
+        self.features = []
         self.bootstrap_value = 0.0
 
-    def add(self, state, action, reward, value, terminal):
+    def add(self, state, action, reward, value, terminal,features):
         self.states += [state]
         self.actions += [action]
         self.rewards += [reward]
         self.values += [value]
         self.terminal = terminal
+        self.features += [features]
+
 
     def extend(self, other_history):
         assert  self.terminal == False
@@ -181,6 +196,7 @@ class EpisodeRollout(object):
         self.rewards.extend(other_history.rewards)
         self.values.extend(other_history.values)
         self.terminal = other_history.terminal
+        self.features.extend(other_history.features)
 
     def update_bootstrap_value(self, value):
         self.bootstrap_value = value
@@ -203,4 +219,6 @@ class EpisodeRollout(object):
         delta_t = rewards + 0.99 * value_predictions[1:] - value_predictions[:-1]
         batch_advantages = self.discount(delta_t, 0.99 * 1.0)
 
-        return [batch_states, batch_actions, batch_advantages, batch_rewards, self.terminal]
+        # features in get_training_batch:  (624, 2, 1, 256)
+        # print ("features in get_training_batch: ", np.asarray(self.features).shape)
+        return [batch_states, batch_actions, batch_advantages, batch_rewards, self.terminal, self.features[0]]
