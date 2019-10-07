@@ -1,5 +1,5 @@
 import tensorflow as tf
-from policys import CNNLSTMPolicy
+from policys import CNNLSTMPolicy, StateActionPredictor
 import scipy.signal
 import numpy as np
 import skimage
@@ -25,6 +25,8 @@ class A3C(object):
                                                    dtype=tf.int32,
                                                    initializer=tf.constant_initializer(0, dtype=tf.int32),
                                                    trainable=False)
+                with tf.variable_scope("predictor"):
+                    self.global_state_action_predictor = StateActionPredictor(ob_space=[160, 120, 3], ac_space=env.action_space.n)
                 #NOTE: #ICM,  we will implement this later
                 #self.global_prediction_network = StateActionPredictor(state_shape = env.observation_space.shape, num_action=env.action_space.n)
 
@@ -34,6 +36,8 @@ class A3C(object):
             with tf.variable_scope("local", reuse=None):
                 self.local_network  =  CNNLSTMPolicy(state_shape = [160, 120, 3], num_action=env.action_space.n)
                 self.local_network.global_step = self.global_step
+                with tf.variable_scope("predictor"):
+                    self.local_state_action_predictor = StateActionPredictor(ob_space=[160, 120, 3], ac_space=env.action_space.n)
                 #NOTE: #ICM,  we will implement this later
                 #self.local_prediction_network = StateActionPredictor(state_shape = env.observation_space.shape, num_action=env.action_space.n)
 
@@ -50,21 +54,40 @@ class A3C(object):
             entropy_loss = -tf.reduce_mean(tf.reduce_sum(probs * tf.log(probs), axis=1)) #element-wise multiplication
             self.loss = policy_loss + 0.5 * value_function_loss - entropy_loss * 0.01
 
-            gradients = tf.gradients(self.loss, tf.get_collection(key=tf.GraphKeys.TRAINABLE_VARIABLES, scope="local"))
-            # NOTE: #ICM,  we will implement this later
-            #self.prediction_network_gradients =  0.01 * self.local_prediction_network.
+            gradients = tf.gradients(self.loss, self.local_network.var_list)
+
+            # ICM
+            self.predict_loss = 10.0 * (self.local_state_action_predictor.invese_loss * (1-0.2) + self.local_state_action_predictor.forward_loss * 0.2)
+            predict_gradients = tf.gradients(self.predict_loss * 20.0, self.local_state_action_predictor.var_list)
+
+            print ("*"*100)
+            print (predict_gradients)
 
             tf.summary.scalar("model/policy_loss", policy_loss )
             tf.summary.scalar("model/value_loss", value_function_loss )
             tf.summary.scalar("model/entropy", entropy_loss)
             tf.summary.scalar("model/reward_mean", tf.math.reduce_mean(self.rewards))
             tf.summary.scalar("model/grad_global_norm", tf.global_norm(gradients))
-            tf.summary.scalar("model/variable_global_norm", tf.global_norm(tf.get_collection(key=tf.GraphKeys.TRAINABLE_VARIABLES, scope="local")))
+            tf.summary.scalar("model/variable_global_norm", tf.global_norm(self.local_network.var_list))
+            if True: # use ICM
+                tf.summary.scalar("model/inverse_loss", self.local_state_action_predictor.invese_loss)
+                tf.summary.scalar("model/forward_loss", self.local_state_action_predictor.forward_loss)
+                tf.summary.scalar("model/predgrad_global_norm", tf.global_norm(predict_gradients))
+                tf.summary.scalar("model/predvar_global_norm", tf.global_norm(self.local_state_action_predictor.var_list))
 
             self.summary_op = tf.summary.merge_all()
 
             gradients, gradient_norms = tf.clip_by_global_norm(t_list=gradients,clip_norm=40.0)
-            grads_and_vars = list(zip(gradients, tf.get_collection(key=tf.GraphKeys.TRAINABLE_VARIABLES, scope="global")))
+            grads_and_vars = list(zip(gradients, self.global_network.var_list))
+            if True: # use ICM
+                predict_gradients = tf.clip_by_global_norm(t_list=predict_gradients, clip_norm=40.0)
+                predict_gradients_and_vars = list(zip(predict_gradients, self.global_state_action_predictor.var_list))
+                print (predict_gradients_and_vars)
+                print ("#"*1000)
+                print (grads_and_vars)
+                print ("#"*1000)
+
+                #grads_and_vars = grads_and_vars + predict_gradients_and_vars
 
             optimizer = tf.train.AdamOptimizer(learning_rate=float(1e-4))
             self.train_op = tf.group(optimizer.apply_gradients(grads_and_vars=grads_and_vars,
@@ -72,9 +95,15 @@ class A3C(object):
 
             # copy weights from the parameter server to the local model.
             sync_assigns = [local_var.assign(global_var) for local_var, global_var in zip(
-                tf.get_collection(key=tf.GraphKeys.TRAINABLE_VARIABLES, scope="local"),
-                tf.get_collection(key=tf.GraphKeys.TRAINABLE_VARIABLES, scope="global")
+                self.local_network.var_list,
+                self.global_network.var_list
             )]
+
+            if True: # use ICM
+                sync_assigns += [local_var.assign(global_var) for local_var, global_var in zip(
+                    self.local_state_action_predictor.var_list,
+                    self.global_state_action_predictor.var_list
+                )]
             self.sync_weights_op = tf.group(*sync_assigns)
 
             self.summary_writer = None
@@ -100,6 +129,10 @@ class A3C(object):
         rewards = 0
         values = 0
 
+        if True: # use ICM
+            life_bonus = 0
+            episode_bonus = 0
+
         # generate batch of episodes
         episode_rollout = EpisodeRollout()
         should_bootstrap = True
@@ -115,7 +148,14 @@ class A3C(object):
 
             self.env.render()
 
-            episode_rollout.add(next_state, action, reward, value, terminal, rnn_features)
+            current_tuple = [current_state, action, reward, value, terminal, rnn_features]
+            if True: #use ICM
+                bonus = self.local_state_action_predictor.predict_bonus(state_1=current_state, state_2=next_state, action_sample=action)
+                current_tuple += [bonus, next_state]
+                life_bonus += bonus
+                episode_bonus += bonus
+
+            episode_rollout.add(*current_tuple)
             rewards += reward
             lengths += 1
             values += value
@@ -130,6 +170,10 @@ class A3C(object):
                 lengths = 0
                 rewards = 0
                 should_bootstrap = False
+
+                if True: #use ICM
+                    life_bonus = 0
+
                 break
 
         # if this loop is ended because of out of index and [not terminal state or time-limit max_episode_steps]
@@ -161,6 +205,13 @@ class A3C(object):
             self.local_network.state_in[0]: batch_features[0],
             self.local_network.state_in[1]: batch_features[1],
         }
+
+        if True: #use ICM
+            feed_dict[self.local_network.inputs] = batch_states[:-1]
+            feed_dict[self.local_state_action_predictor.state_1] = batch_states[:-1]
+            feed_dict[self.local_state_action_predictor.state_2] = batch_states[1:]
+            feed_dict[self.local_state_action_predictor.action_sample] = batch_actions
+
         fetched = self.sess.run(fetches, feed_dict=feed_dict)
         self.local_step += 1
 
@@ -171,7 +222,7 @@ class A3C(object):
         print (f"*** Worker {self.worker_task_index} at local step: {self.local_step}, reward_mean: {np.mean(batch_rewards)}")
 
 class EpisodeRollout(object):
-    def __init__(self):
+    def __init__(self, use_icm=True):
         self.states = []
         self.actions = []
         self.rewards = []
@@ -179,14 +230,21 @@ class EpisodeRollout(object):
         self.terminal = False
         self.features = []
         self.bootstrap_value = 0.0
+        self.use_icm = use_icm
+        if use_icm:
+            self.bonuses = []
+            self.end_state = None
 
-    def add(self, state, action, reward, value, terminal,features):
+    def add(self, state, action, reward, value, terminal,features, bonus=None, end_state=None):
         self.states += [state]
         self.actions += [action]
         self.rewards += [reward]
         self.values += [value]
         self.terminal = terminal
         self.features += [features]
+        if self.use_icm:
+            self.bonuses += [bonus]
+            self.end_state = end_state
 
 
     def extend(self, other_history):
@@ -198,6 +256,10 @@ class EpisodeRollout(object):
         self.terminal = other_history.terminal
         self.features.extend(other_history.features)
 
+        if self.use_icm:
+            self.bonuses.extend(other_history.bonuses)
+            self.end_state = other_history.end_state
+
     def update_bootstrap_value(self, value):
         self.bootstrap_value = value
 
@@ -205,20 +267,33 @@ class EpisodeRollout(object):
         return scipy.signal.lfilter([1], [1, -gamma], x[::-1], axis=0)[::-1]
 
     def get_training_batch(self):
-        batch_states = np.asarray(self.states)
+        if True: #use ICM
+            batch_states = np.asarray(self.states +  [self.end_state])
+        else:
+            batch_states = np.asarray(self.states)
         batch_actions = np.asarray(self.actions)
 
         # collecting target for value network
-        #clip reward
-        rewards = np.asarray(self.rewards)
-        rewards = np.clip(rewards, -1, 1)
-        batch_rewards = self.discount(rewards + [self.bootstrap_value], gamma=0.99)[:-1]
+        rewards_plus_v = np.asarray(self.rewards + [self.bootstrap_value])
+        if True: #use ICM
+            rewards_plus_v += np.asarray(self.bonuses + [0])
+        rewards_plus_v[:-1] = np.clip(rewards_plus_v[:-1], -1.0, 1.0)
+        batch_rewards = self.discount(rewards_plus_v, gamma=0.99)[:-1]
 
         #collecting target for policy network
+        rewards = np.asarray(self.rewards)
+        if True: #use ICM
+            rewards += np.asarray(self.bonuses)
+        rewards = np.clip(rewards, -1, 1)
         value_predictions = np.asarray(self.values + [self.bootstrap_value])
+
+
+        # "Generalized Advantage Estimation": https://arxiv.org/abs/1506.02438
+        # Eq (10): delta_t = Rt + gamma*V_{t+1} - V_t
+        # Eq (16): batch_adv_t = delta_t + gamma*delta_{t+1} + gamma^2*delta_{t+2} + ...
         delta_t = rewards + 0.99 * value_predictions[1:] - value_predictions[:-1]
         batch_advantages = self.discount(delta_t, 0.99 * 1.0)
 
-        # features in get_training_batch:  (624, 2, 1, 256)
+        # features in get_training_batch:  (624, 2, 1, 256)ip
         # print ("features in get_training_batch: ", np.asarray(self.features).shape)
         return [batch_states, batch_actions, batch_advantages, batch_rewards, self.terminal, self.features[0]]
