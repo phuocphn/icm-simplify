@@ -30,7 +30,7 @@ print ("env.spec.timestep_limit: ", env.spec.tags.get('wrapper_config.TimeLimit.
 print ("*" * 50)
 time.sleep(5)
 
-cluster = tf.train.ClusterSpec({"ps": ["localhost:12200"], "worker": ["localhost:12300", "localhost:12301", "localhost:12302", "localhost:12303"]})
+cluster = tf.train.ClusterSpec({"ps": ["localhost:12200"], "worker": ["localhost:{}".format(port) for port in range(12300, 12500, 1)]})
 if JOB_NAME == 'ps':
     #os.system("kill -9 $( lsof -i:12200 -t ) > /dev/null 2>&1")
     server = tf.train.Server(server_or_cluster_def=cluster, job_name=JOB_NAME, task_index=0,

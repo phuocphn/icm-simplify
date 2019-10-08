@@ -27,8 +27,8 @@ def FeatureExtractor(inputs):
                                              weights_initializer=tf.contrib.layers.xavier_initializer_conv2d(),
                                              biases_initializer=tf.constant_initializer(0.1))
 
-    with tf.variable_scope("output_flatten"):
-        output = tf.reshape(conv_4, [-1, np.prod(conv_4.get_shape().as_list()[1:])])
+    with tf.variable_scope("flatten_output"):
+        output = tf.reshape(conv_4, [-1, np.prod(conv_4.get_shape().as_list()[1:])], name="reshaped_flatten_output")
 
     return output
 
@@ -135,10 +135,10 @@ class StateActionPredictor(object):
         g = tf.concat([phi1, phi2], 1 )
         g = tf.contrib.layers.fully_connected(g, num_outputs=256, activation_fn=tf.nn.relu,
                                                     weights_initializer=tf.contrib.layers.xavier_initializer(),
-                                                    biases_initializer=tf.constant_initializer(0.1))
+                                                    biases_initializer=tf.constant_initializer(0.1), scope="inverse_fully_connected_layer_1")
         logits = tf.contrib.layers.fully_connected(g, num_outputs=ac_space, activation_fn=None,
                                                     weights_initializer=tf.contrib.layers.xavier_initializer(),
-                                                    biases_initializer=tf.constant_initializer(0.1))
+                                                    biases_initializer=tf.constant_initializer(0.1), scope="inverse_fully_connected_layer_2")
         action_indexes = tf.argmax(action_sample, axis=1)
         self.invese_loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=action_indexes), name="inverse_loss")
         self.action_inverse_probs = tf.nn.softmax(logits, dim=-1)
@@ -148,11 +148,11 @@ class StateActionPredictor(object):
         f = tf.concat([phi1, action_sample], 1)
         f = tf.contrib.layers.fully_connected(f, num_outputs=256, activation_fn=tf.nn.relu,
                                                     weights_initializer=tf.contrib.layers.xavier_initializer(),
-                                                  biases_initializer=tf.constant_initializer(0.1))
+                                                  biases_initializer=tf.constant_initializer(0.1), scope="forward_fully_connected_layer_1")
 
         f = tf.contrib.layers.fully_connected(f, num_outputs=phi1.get_shape()[1].value, activation_fn=None,
                                                     weights_initializer=tf.contrib.layers.xavier_initializer(),
-                                                    biases_initializer=tf.constant_initializer(0.1))
+                                                    biases_initializer=tf.constant_initializer(0.1), scope="forward_fully_connected_layer_2")
         self.forward_loss = 0.5 * tf.reduce_mean(tf.square(tf.subtract(f, phi2)), name="forward_loss")
         self.forward_loss *= 288.0
 

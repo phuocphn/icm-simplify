@@ -3,7 +3,6 @@ from policys import CNNLSTMPolicy, StateActionPredictor
 import scipy.signal
 import numpy as np
 import skimage
-from tqdm import tqdm
 
 class A3C(object):
     def __init__(self, env, worker_task_index, sess=None):
@@ -58,11 +57,14 @@ class A3C(object):
 
             # ICM
             self.predict_loss = 10.0 * (self.local_state_action_predictor.invese_loss * (1-0.2) + self.local_state_action_predictor.forward_loss * 0.2)
-            predict_gradients = tf.gradients(self.predict_loss * 20.0, self.local_state_action_predictor.var_list)
+            #self.predict_loss = 10.0 * (self.local_state_action_predictor.invese_loss )
 
+            predict_gradients = tf.gradients(self.predict_loss * 20.0, self.local_state_action_predictor.var_list)
+            print ("$"*100)
+            print (self.local_state_action_predictor.var_list)
             print ("*"*100)
             print (predict_gradients)
-
+            #exit()
             tf.summary.scalar("model/policy_loss", policy_loss )
             tf.summary.scalar("model/value_loss", value_function_loss )
             tf.summary.scalar("model/entropy", entropy_loss)
@@ -77,17 +79,35 @@ class A3C(object):
 
             self.summary_op = tf.summary.merge_all()
 
-            gradients, gradient_norms = tf.clip_by_global_norm(t_list=gradients,clip_norm=40.0)
+            gradients, gradient_norms = tf.clip_by_global_norm(gradients,clip_norm=40.0)
             grads_and_vars = list(zip(gradients, self.global_network.var_list))
             if True: # use ICM
-                predict_gradients = tf.clip_by_global_norm(t_list=predict_gradients, clip_norm=40.0)
+                print ("before   ---- predict_gradients: " )
+                print ("*"*100)
+                print (predict_gradients)
+                print ("*"*100)
+
+
+                predict_gradients, _ = tf.clip_by_global_norm(predict_gradients, clip_norm=40.0)
                 predict_gradients_and_vars = list(zip(predict_gradients, self.global_state_action_predictor.var_list))
+                print ("predict_gradients: " )
+                print ("*"*100)
+                print (predict_gradients)
+                print ("*"*100)
+                print ("predict_gradients_and_vars: " )
+                print ("*"*100)
+                print (predict_gradients_and_vars)
+                print ("*"*100)
+
                 print (predict_gradients_and_vars)
                 print ("#"*1000)
                 print (grads_and_vars)
                 print ("#"*1000)
-
-                #grads_and_vars = grads_and_vars + predict_gradients_and_vars
+                #ex_delta_t = tf.reduce_mean(tf.concat([tf.reshape(g, [-1]) for g in tf.gradients(t
+                grads_and_vars = grads_and_vars + predict_gradients_and_vars
+                print ("*"*100)
+                print (grads_and_vars)
+                #exit()
 
             optimizer = tf.train.AdamOptimizer(learning_rate=float(1e-4))
             self.train_op = tf.group(optimizer.apply_gradients(grads_and_vars=grads_and_vars,
